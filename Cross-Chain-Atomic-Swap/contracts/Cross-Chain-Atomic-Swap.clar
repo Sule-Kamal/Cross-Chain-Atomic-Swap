@@ -221,3 +221,76 @@
     (ok true)
   )
 )
+
+;; Submit a signature for a multi-sig swap approval
+(define-public (approve-multi-sig-swap (swap-id (buff 32)) (signature (buff 65)))
+  (let (
+    (swap (unwrap! (map-get? swaps { swap-id: swap-id }) (err ERR-SWAP-NOT-FOUND)))
+    (signer tx-sender)
+    (current-height stacks-block-height)
+  )
+    ;; Validate signature (in production, would verify cryptographic signature)
+    (asserts! (or (is-eq signer (get initiator swap)) (is-eq signer (get participant swap))) 
+      (err ERR-UNAUTHORIZED))
+    (asserts! (not (get claimed swap)) (err ERR-ALREADY-CLAIMED))
+    (asserts! (not (get refunded swap)) (err ERR-INVALID-REFUND))
+    (asserts! (not (is-swap-expired (get expiration-height swap))) (err ERR-SWAP-EXPIRED))
+    
+    ;; Record this approval
+    (map-set multi-sig-approvals
+      { swap-id: swap-id, signer: signer }
+      { approved: true, signature-time: current-height }
+    )
+    
+    ;; Update the provided signature count
+    (map-set swaps
+      { swap-id: swap-id }
+      (merge swap { multi-sig-provided: (+ (get multi-sig-provided swap) u1) })
+    )
+    
+    ;; Return success
+    (ok true)
+  )
+)
+
+;; Create a new mixing pool for enhanced privacy
+(define-public (create-mixing-pool 
+  (min-amount uint) 
+  (max-amount uint) 
+  (activation-threshold uint)
+  (execution-delay uint)
+  (execution-window uint)
+)
+  (let (
+    (creator tx-sender)
+    (current-height stacks-block-height)
+    (pool-id (sha256 (concat 
+      (unwrap-panic (to-consensus-buff? creator))
+      (unwrap-panic (to-consensus-buff? current-height))
+    )))
+  )
+    ;; Validation
+    (asserts! (>= min-amount MIN-SWAP-AMOUNT) (err ERR-INSUFFICIENT-FUNDS))
+    (asserts! (>= max-amount min-amount) (err ERR-INSUFFICIENT-FUNDS))
+    (asserts! (> activation-threshold u0) (err ERR-INVALID-PARTICIPANT))
+    
+    ;; Create the pool
+    (map-set mixing-pools
+      { pool-id: pool-id }
+      {
+        total-amount: u0,
+        participant-count: u0,
+        min-amount: min-amount,
+        max-amount: max-amount,
+        activation-threshold: activation-threshold,
+        active: false,
+        creation-height: current-height,
+        execution-delay: execution-delay,
+        execution-window: execution-window
+      }
+    )
+    
+    ;; Return the pool ID
+    (ok pool-id)
+  )
+)
